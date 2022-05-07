@@ -155,6 +155,35 @@ func (bus *EventBus) Publish(topic string, args ...interface{}) {
 	}
 }
 
+// Publish executes callback defined for a topic. Any additional argument will be transferred to the callback.
+func (bus *EventBus) Execute(args ...interface{}) {
+	bus.lock.Lock() // will unlock if handler is not found or always after setUpPublish
+	defer bus.lock.Unlock()
+	topic := getType(args[0])
+	if handlers, ok := bus.handlers[topic]; ok && 0 < len(handlers) {
+		// Handlers slice may be changed by removeHandler and Unsubscribe during iteration,
+		// so make a copy and iterate the copied slice.
+		copyHandlers := make([]*eventHandler, len(handlers))
+		copy(copyHandlers, handlers)
+		for i, handler := range copyHandlers {
+			if handler.flagOnce {
+				bus.removeHandler(topic, i)
+			}
+			if !handler.async {
+				bus.doPublish(handler, topic, args...)
+			} else {
+				bus.wg.Add(1)
+				if handler.transactional {
+					bus.lock.Unlock()
+					handler.Lock()
+					bus.lock.Lock()
+				}
+				go bus.doPublishAsync(handler, topic, args...)
+			}
+		}
+	}
+}
+
 func (bus *EventBus) doPublish(handler *eventHandler, topic string, args ...interface{}) {
 	passedArguments := bus.setUpPublish(handler, args...)
 	handler.callBack.Call(passedArguments)
@@ -212,4 +241,12 @@ func (bus *EventBus) setUpPublish(callback *eventHandler, args ...interface{}) [
 // WaitAsync waits for all async callbacks to complete
 func (bus *EventBus) WaitAsync() {
 	bus.wg.Wait()
+}
+
+func getType(myvar interface{}) string {
+	if t := reflect.TypeOf(myvar); t.Kind() == reflect.Ptr {
+		return t.Elem().Name()
+	} else {
+		return t.Name()
+	}
 }
