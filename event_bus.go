@@ -18,6 +18,7 @@ type BusSubscriber interface {
 //BusPublisher defines publishing-related bus behavior
 type BusPublisher interface {
 	Publish(topic string, args ...interface{})
+	Execute(args ...interface{})
 }
 
 //BusController defines bus control behavior (checking handler's presence, synchronization)
